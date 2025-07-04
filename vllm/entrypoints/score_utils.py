@@ -22,6 +22,10 @@ ScoreContentPartParam: TypeAlias = Union[
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartImageEmbedsParam]
 
+RerankContentPartParam: TypeAlias = Union[
+    ChatCompletionContentPartImageParam,
+    ChatCompletionContentPartImageEmbedsParam]
+
 
 class ScoreMultiModalParam(TypedDict, total=False):
     """
@@ -33,6 +37,14 @@ class ScoreMultiModalParam(TypedDict, total=False):
     3. This is a more focused interface that only exposes what's needed for scoring
     """
     content: Required[list[ScoreContentPartParam]]
+    """The multimodal contents"""
+
+class RerankMultiModalParam(TypedDict, total=False):
+    """
+    A specialized parameter type for reranking multimodal content
+    
+    """
+    content: Required[list[RerankContentPartParam]]
     """The multimodal contents"""
 
 

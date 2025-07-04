@@ -19,7 +19,7 @@ from vllm import envs
 from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
                                          random_tool_call_id)
 from vllm.entrypoints.score_utils import (ScoreContentPartParam,
-                                          ScoreMultiModalParam)
+                                          ScoreMultiModalParam,RerankMultiModalParam)
 from vllm.logger import init_logger
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import (BeamSearchParams, GuidedDecodingParams,
@@ -1209,8 +1209,8 @@ class ScoreRequest(OpenAIBaseModel):
 
 class RerankRequest(OpenAIBaseModel):
     model: Optional[str] = None
-    query: Union[str, ScoreMultiModalParam]
-    documents: Union[list[str], ScoreMultiModalParam]
+    query: Union[str, RerankMultiModalParam]
+    documents: Union[list[str], RerankMultiModalParam]
     top_n: int = Field(default_factory=lambda: 0)
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=-1)]] = None
 
@@ -1240,7 +1240,7 @@ class RerankRequest(OpenAIBaseModel):
 
 
 class RerankDocument(BaseModel):
-    data: Union[str, ScoreContentPartParam]
+    data: Union[str, RerankMultiModalParam]
 
 
 class RerankResult(BaseModel):
