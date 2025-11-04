@@ -104,6 +104,8 @@ class EngineCoreOutput(
 
     request_id: str
     new_token_ids: list[int]
+    new_audio_token_ids: list[int]
+    new_aux_output_infos: dict
 
     new_logprobs: Optional[LogprobsLists] = None
     new_prompt_logprobs_tensors: Optional[LogprobsTensors] = None

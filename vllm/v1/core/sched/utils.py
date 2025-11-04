@@ -42,7 +42,13 @@ def remove_all(lst: list, items_to_remove: set) -> list:
 
 def check_stop(request: Request,
                max_model_len: int,
-               pooler_output: Optional[torch.Tensor] = None) -> bool:
+               pooler_output: Optional[torch.Tensor] = None,
+               abort_from_sampling: set[str]|None = None) -> bool:
+
+    if abort_from_sampling and request.request_id in abort_from_sampling:
+        request.status = RequestStatus.FINISHED_ABORTED
+        return True
+    
     if (request.num_tokens >= max_model_len
             or request.num_output_tokens >= request.max_tokens):
         request.status = RequestStatus.FINISHED_LENGTH_CAPPED

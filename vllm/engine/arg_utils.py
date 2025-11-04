@@ -448,6 +448,7 @@ class EngineArgs:
     pooler_config: Optional[PoolerConfig] = ModelConfig.pooler_config
     override_pooler_config: Optional[Union[dict, PoolerConfig]] = \
         ModelConfig.override_pooler_config
+
     compilation_config: CompilationConfig = \
         get_field(VllmConfig, "compilation_config")
     worker_cls: str = ParallelConfig.worker_cls

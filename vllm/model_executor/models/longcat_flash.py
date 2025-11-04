@@ -601,7 +601,7 @@ class LongcatFlashForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
 
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in weights:
-            if "rotary_emb.inv_freq" in name:
+            if "rotary_emb.inv_freq" in name or "audio" in name or "embedding" in name:
                 continue
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:

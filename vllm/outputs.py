@@ -40,6 +40,8 @@ class CompletionOutput:
     index: int
     text: str
     token_ids: GenericSequence[int]
+    audio_token_ids: GenericSequence[int]
+    aux_output_infos: dict
     cumulative_logprob: Optional[float]
     logprobs: Optional[SampleLogprobs]
     finish_reason: Optional[str] = None
@@ -53,6 +55,8 @@ class CompletionOutput:
         return (f"CompletionOutput(index={self.index}, "
                 f"text={self.text!r}, "
                 f"token_ids={self.token_ids}, "
+                f"audio_token_ids={self.audio_token_ids}, "
+                f"aux_output_infos={self.aux_output_infos}, "
                 f"cumulative_logprob={self.cumulative_logprob}, "
                 f"logprobs={self.logprobs}, "
                 f"finish_reason={self.finish_reason}, "

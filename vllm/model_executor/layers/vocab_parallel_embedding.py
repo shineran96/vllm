@@ -213,12 +213,17 @@ class VocabParallelEmbedding(CustomOp):
                  org_num_embeddings: Optional[int] = None,
                  padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
                  quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+                 prefix: str = "", enable_tp: bool = True):
         super().__init__()
 
         # Keep the input dimensions.
-        tp_rank = get_tensor_model_parallel_rank()
-        self.tp_size = get_tensor_model_parallel_world_size()
+        self.enable_tp = enable_tp
+        if enable_tp:
+            tp_rank = get_tensor_model_parallel_rank()
+            self.tp_size = get_tensor_model_parallel_world_size()
+        else:
+            tp_rank = 0
+            self.tp_size = 1
         self.num_embeddings = num_embeddings
         self.padding_size = padding_size
         self.org_vocab_size = org_num_embeddings or num_embeddings
@@ -413,6 +418,9 @@ class VocabParallelEmbedding(CustomOp):
         # Get the embeddings.
         output_parallel = self.quant_method.embedding(self,
                                                       masked_input.long())
+        if not self.enable_tp:
+            return output_parallel
+
         # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)

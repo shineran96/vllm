@@ -184,6 +184,8 @@ class RequestState:
     def make_request_output(
         self,
         new_token_ids: list[int],
+        new_audio_token_ids: list[int],
+        new_aux_output_infos: dict,
         pooling_output: Optional[torch.Tensor],
         finish_reason: Optional[FinishReason],
         stop_reason: Union[int, str, None],
@@ -203,7 +205,7 @@ class RequestState:
                 request_id, [self._new_pooling_output(pooling_output)],
                 finished)
 
-        output = self._new_completion_output(new_token_ids, finish_reason,
+        output = self._new_completion_output(new_token_ids, new_audio_token_ids, new_aux_output_infos, finish_reason,
                                              stop_reason)
 
         if self.parent_req is None:
@@ -262,6 +264,8 @@ class RequestState:
     def _new_completion_output(
         self,
         token_ids: list[int],
+        audio_token_ids: list[int],
+        aux_output_infos: dict,
         finish_reason: Optional[FinishReason],
         stop_reason: Union[int, str, None],
     ) -> CompletionOutput:
@@ -275,6 +279,8 @@ class RequestState:
         text = self.detokenizer.get_next_output_text(finished, delta)
         if not delta:
             token_ids = self.detokenizer.output_token_ids
+            audio_token_ids =self.detokenizer.output_audio_token_ids
+            aux_output_infos =self.detokenizer.output_aux_output_infos
 
         # Prepare logprobs, based on delta mode
         logprobs = self.logprobs_processor.logprobs
@@ -285,6 +291,8 @@ class RequestState:
             index=self.request_index,
             text=text,
             token_ids=token_ids,
+            audio_token_ids=audio_token_ids,
+            aux_output_infos=aux_output_infos,
             logprobs=logprobs,
             cumulative_logprob=self.logprobs_processor.cumulative_logprob,
             finish_reason=str(finish_reason) if finished else None,
@@ -421,6 +429,8 @@ class OutputProcessor:
                                            iteration_stats)
 
             new_token_ids = engine_core_output.new_token_ids
+            new_audio_token_ids = engine_core_output.new_audio_token_ids
+            new_aux_output_infos = engine_core_output.new_aux_output_infos
             pooling_output = engine_core_output.pooling_output
             finish_reason = engine_core_output.finish_reason
             stop_reason = engine_core_output.stop_reason
@@ -433,7 +443,7 @@ class OutputProcessor:
                 assert req_state.logprobs_processor is not None
                 # 2) Detokenize the token ids into text and perform stop checks.
                 stop_string = req_state.detokenizer.update(
-                    new_token_ids, finish_reason == FinishReason.STOP)
+                    new_token_ids, finish_reason == FinishReason.STOP, new_audio_token_ids=new_audio_token_ids, new_aux_output_infos=new_aux_output_infos)
                 if stop_string:
                     finish_reason = FinishReason.STOP
                     stop_reason = stop_string
@@ -445,7 +455,7 @@ class OutputProcessor:
 
             # 4) Create and handle RequestOutput objects.
             if request_output := req_state.make_request_output(
-                    new_token_ids, pooling_output, finish_reason, stop_reason,
+                    new_token_ids, new_audio_token_ids, new_aux_output_infos, pooling_output, finish_reason, stop_reason,
                     kv_transfer_params):
                 if req_state.queue is not None:
                     # AsyncLLM: put into queue for handling by generate().

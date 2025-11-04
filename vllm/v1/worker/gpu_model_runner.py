@@ -616,6 +616,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 block_ids=new_req_data.block_ids,
                 num_computed_tokens=new_req_data.num_computed_tokens,
                 output_token_ids=[],
+                aux_output_infos={},
                 lora_request=new_req_data.lora_request,
             )
             self.requests[req_id] = req_state
@@ -1118,8 +1119,41 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         self.discard_request_indices.copy_to_gpu(self.num_discarded_requests)
 
+
+
         # Copy the tensors to the GPU.
         self._prepare_input_ids(total_num_scheduled_tokens, cu_num_tokens)
+
+        if self.input_batch.prev_output_embeds and self.model_sampling:
+            discard_sampled_tokens_req_indices = \
+                    self.discard_request_indices.np[:self.num_discarded_requests]
+            invalid_req_indices = discard_sampled_tokens_req_indices.tolist()
+            invalid_req_indices_set = set(invalid_req_indices)
+            output_idx = 0
+            for req_idx in range(num_reqs):
+                num_sched = num_scheduled_tokens[req_idx]
+
+                if req_idx in invalid_req_indices_set:
+                    output_idx += num_sched
+                    continue
+
+                # Skip if this request doesn't have embeddings
+                if req_idx not in self.input_batch.prev_output_embeds:
+                    output_idx += num_sched
+                    continue
+
+                if num_sched != 1:
+                    output_idx += num_sched
+                    continue
+
+                req_embeds = self.input_batch.prev_output_embeds[req_idx]
+
+                self.inputs_embeds.gpu[output_idx:output_idx +
+                                           num_sched].copy_(
+                                               req_embeds
+                                           )
+
+                output_idx += num_sched
 
         if self.uses_mrope:
             # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
@@ -2063,15 +2097,17 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # If a batch only has token ids, then including the embedding layer
             # in the CUDA graph will be more performant (like in the else case
             # below).
-            token_ids_idx = self.is_token_ids.gpu[:num_scheduled_tokens] \
-                .nonzero(as_tuple=False) \
-                .squeeze(1)
-            # Some tokens ids may need to become embeds
-            if token_ids_idx.numel() > 0:
-                token_ids = self.input_ids.gpu[token_ids_idx]
-                tokens_to_embeds = self.model.get_input_embeddings(
-                    input_ids=token_ids)
-                self.inputs_embeds.gpu[token_ids_idx] = tokens_to_embeds
+
+            if not self.input_batch.prev_output_embeds:
+                token_ids_idx = self.is_token_ids.gpu[:num_scheduled_tokens] \
+                    .nonzero(as_tuple=False) \
+                    .squeeze(1)
+                # Some tokens ids may need to become embeds
+                if token_ids_idx.numel() > 0:
+                    token_ids = self.input_ids.gpu[token_ids_idx]
+                    tokens_to_embeds = self.model.get_input_embeddings(
+                        input_ids=token_ids)
+                    self.inputs_embeds.gpu[token_ids_idx] = tokens_to_embeds
 
             inputs_embeds = self.inputs_embeds.gpu[:num_input_tokens]
             model_kwargs = self._init_model_kwargs(num_input_tokens)
@@ -2159,6 +2195,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             dict[str, int],
             Optional[LogprobsLists],
             list[list[int]],
+            list[list[int]] | None,
             dict[str, Optional[LogprobsTensors]],
             list[str],
             dict[str, int],
@@ -2195,13 +2232,17 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
         sampled_token_ids = sampler_output.sampled_token_ids
+        sampled_audio_token_ids = sampler_output.other_ids
         invalid_req_indices = []
+        valid_sampled_audio_token_ids = None
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
             max_gen_len = sampled_token_ids.shape[-1]
             if max_gen_len == 1:
                 # No spec decode tokens.
                 valid_sampled_token_ids = self._to_list(sampled_token_ids)
+                if sampled_audio_token_ids is not None:
+                   valid_sampled_audio_token_ids = sampled_audio_token_ids.tolist()
             else:
                 # Includes spec decode tokens.
                 valid_sampled_token_ids = self.rejection_sampler.parse_output(
@@ -2211,6 +2252,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # Mask out the sampled tokens that should not be sampled.
             for i in discard_sampled_tokens_req_indices:
                 valid_sampled_token_ids[int(i)].clear()
+                if valid_sampled_audio_token_ids is not None:
+                    valid_sampled_audio_token_ids[int(i)].clear()
         else:
             valid_sampled_token_ids = []
             invalid_req_indices = discard_sampled_tokens_req_indices.tolist()
@@ -2266,6 +2309,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_nans_in_logits,
             logprobs_lists,
             valid_sampled_token_ids,
+            valid_sampled_audio_token_ids,
             prompt_logprobs_dict,
             req_ids_output_copy,
             req_id_to_index_output_copy,
@@ -2466,7 +2510,15 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                       logits, self.device)
 
         with record_function_or_nullcontext("Sample"):
-            sampler_output = self._sample(logits, spec_decode_metadata)
+            if self.model_sampling:
+                discard_sampled_tokens_req_indices = \
+                    self.discard_request_indices.np[:self.num_discarded_requests]
+                invalid_req_indices = discard_sampled_tokens_req_indices.tolist()
+                invalid_req_indices_set = set(invalid_req_indices)
+
+                sampler_output = self.model.sample(self.input_batch, self.requests, num_scheduled_tokens, logits, sample_hidden_states, invalid_req_indices_set)
+            else:
+                sampler_output = self._sample(logits, spec_decode_metadata)
 
         def propose_draft_token_ids(sampled_token_ids):
             assert spec_decode_common_attn_metadata is not None
@@ -2508,6 +2560,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 num_nans_in_logits,
                 logprobs_lists,
                 valid_sampled_token_ids,
+                valid_sampled_audio_token_ids,
                 prompt_logprobs_dict,
                 req_ids_output_copy,
                 req_id_to_index_output_copy,
@@ -2525,15 +2578,27 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         with record_function_or_nullcontext("EPLB"):
             self.eplb_step()
 
+        req_aux_output_infos={}
+        for i, req_id in enumerate(self.input_batch.req_ids):
+            if i not in invalid_req_indices_set:
+                origin_aux_output_infos = self.requests[req_id].aux_output_infos
+                incre_aux_output_infos = {}
+                for key, value in origin_aux_output_infos.items():
+                    incre_aux_output_infos[key] = value[len(self.requests[req_id].output_token_ids)-1:]
+                req_aux_output_infos[req_id] = incre_aux_output_infos
+
         output = ModelRunnerOutput(
             req_ids=req_ids_output_copy,
             req_id_to_index=req_id_to_index_output_copy,
             sampled_token_ids=valid_sampled_token_ids,
+            sampled_audio_token_ids=valid_sampled_audio_token_ids,
             logprobs=logprobs_lists,
             prompt_logprobs_dict=prompt_logprobs_dict,
             pooler_output=[],
             kv_connector_output=kv_connector_output,
             num_nans_in_logits=num_nans_in_logits,
+            abort_from_sampling=sampler_output.abort_from_sampling,
+            aux_output_infos=req_aux_output_infos,
         )
 
         if not self.use_async_scheduling:
@@ -2802,6 +2867,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             else:
                 self.model = UBatchWrapper(self.model, self.vllm_config,
                                            CUDAGraphMode.NONE, self.device)
+        
+        self.model_sampling = hasattr(self.model, "sample")
 
     def reload_weights(self) -> None:
         assert getattr(self, "model", None) is not None, \

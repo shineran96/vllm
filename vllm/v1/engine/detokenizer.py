@@ -30,14 +30,32 @@ class IncrementalDetokenizer:
 
     def __init__(self):
         self.token_ids: list[int] = []
+        self.audio_token_ids: list[list[int]] = []
+        self.aux_output_infos: dict = {}
 
     @property
     def output_token_ids(self) -> list[int]:
         return self.token_ids
 
+    @property
+    def output_audio_token_ids(self) -> list[list[int]]:
+        return self.audio_token_ids
+
+    @property
+    def output_aux_output_infos(self) -> dict:
+        return self.aux_output_infos
+
     def update(self, new_token_ids: list[int],
-               stop_terminated: bool) -> Optional[str]:
+               stop_terminated: bool, new_audio_token_ids: list[int]=[], new_aux_output_infos: dict = {}) -> Optional[str]:
         self.token_ids.extend(new_token_ids)
+        self.audio_token_ids.append(new_audio_token_ids)
+
+        for key, value in new_aux_output_infos.items():
+            if key not in self.aux_output_infos:
+                self.aux_output_infos[key] = value
+            else:
+                self.aux_output_infos[key].extend(value)
+
         return None
 
     def get_next_output_text(self, finished: bool, delta: bool) -> str:
@@ -89,7 +107,7 @@ class BaseIncrementalDetokenizer(IncrementalDetokenizer, ABC):
         self.output_text = ""
 
     def update(self, new_token_ids: list[int],
-               stop_terminated: bool) -> Optional[str]:
+               stop_terminated: bool, new_audio_token_ids: list[int] = [], new_aux_output_infos: dict = {}) -> Optional[str]:
         """
         Update RequestState for the request_id by:
             1) Detokenize the new token ids incrementally.
@@ -120,6 +138,14 @@ class BaseIncrementalDetokenizer(IncrementalDetokenizer, ABC):
             if self.min_tokens and len(
                     self.output_token_ids) <= self.min_tokens:
                 stop_check_offset = len(self.output_text)
+
+        self.audio_token_ids.append(new_audio_token_ids)
+
+        for key, value in new_aux_output_infos.items():
+            if key not in self.aux_output_infos:
+                self.aux_output_infos[key] = value
+            else:
+                self.aux_output_infos[key].extend(value)
 
         if skipped_stop_token_id is not None:
             # Cleanup after skipping detokenization.

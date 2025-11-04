@@ -79,6 +79,8 @@ class SamplerOutput:
     # PLACEHOLDER_TOKEN_ID (-1 by default) is used for padding.
     sampled_token_ids: torch.Tensor
     logprobs_tensors: Optional[LogprobsTensors]
+    other_ids: torch.Tensor|None = None
+    abort_from_sampling: set[str]|None = None
 
 
 @dataclass
@@ -130,6 +132,12 @@ class ModelRunnerOutput:
 
     # req_id -> num_nans_in_logits
     num_nans_in_logits: Optional[dict[str, int]] = None
+
+    abort_from_sampling: set[str]|None = None
+
+    aux_output_infos: dict[str,dict] | None = None
+
+    sampled_audio_token_ids: list[list[int]] | None = None
 
 
 # ModelRunnerOutput wrapper for async scheduling.

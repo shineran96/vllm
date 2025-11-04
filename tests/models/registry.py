@@ -279,6 +279,8 @@ _TEXT_GENERATION_EXAMPLE_MODELS = {
                                          is_available_online=False),
     "LongcatFlashForCausalLM": _HfExamplesInfo
                 ("meituan-longcat/LongCat-Flash-Chat", trust_remote_code=True),
+    "LongcatFlashOmniForCausalLM": _HfExamplesInfo
+                ("meituan-longcat/LongCat-Flash-Omni", trust_remote_code=True),
     "MambaForCausalLM": _HfExamplesInfo("state-spaces/mamba-130m-hf"),
     "Mamba2ForCausalLM": _HfExamplesInfo("mistralai/Mamba-Codestral-7B-v0.1",
                                          min_transformers_version="4.55.3",

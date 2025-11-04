@@ -870,12 +870,15 @@ class Scheduler(SchedulerInterface):
         model_runner_output: ModelRunnerOutput,
     ) -> dict[int, EngineCoreOutputs]:
         sampled_token_ids = model_runner_output.sampled_token_ids
+        sampled_audio_token_ids = model_runner_output.sampled_audio_token_ids
+        aux_output_infos = model_runner_output.aux_output_infos
         logprobs = model_runner_output.logprobs
         prompt_logprobs_dict = model_runner_output.prompt_logprobs_dict
         num_scheduled_tokens = scheduler_output.num_scheduled_tokens
         pooler_outputs = model_runner_output.pooler_output
         num_nans_in_logits = model_runner_output.num_nans_in_logits
         kv_connector_output = model_runner_output.kv_connector_output
+        abort_from_sampling = model_runner_output.abort_from_sampling
 
         outputs: dict[int, list[EngineCoreOutput]] = defaultdict(list)
         spec_decoding_stats: Optional[SpecDecodingStats] = None
@@ -911,6 +914,12 @@ class Scheduler(SchedulerInterface):
             generated_token_ids = sampled_token_ids[
                 req_index] if sampled_token_ids else []
 
+            generated_audio_token_ids = sampled_audio_token_ids[
+                req_index] if sampled_audio_token_ids else []
+
+            generated_aux_output_infos = aux_output_infos[
+                req_id] if aux_output_infos else {}
+
             scheduled_spec_token_ids = (
                 scheduler_output.scheduled_spec_decode_tokens.get(req_id))
             if scheduled_spec_token_ids:
@@ -931,13 +940,15 @@ class Scheduler(SchedulerInterface):
             stopped = False
             new_logprobs = None
             new_token_ids = generated_token_ids
+            new_audio_token_ids = generated_audio_token_ids
+            new_aux_output_infos= generated_aux_output_infos
             kv_transfer_params = None
             status_before_stop = request.status
 
             # Check for stop and update request status.
             if new_token_ids:
                 new_token_ids, stopped = self._update_request_with_output(
-                    request, new_token_ids)
+                    request, new_token_ids, abort_from_sampling)
 
             # Stop checking for pooler models.
             pooler_output = None
@@ -981,6 +992,8 @@ class Scheduler(SchedulerInterface):
                     EngineCoreOutput(
                         request_id=req_id,
                         new_token_ids=new_token_ids,
+                        new_audio_token_ids=new_audio_token_ids,
+                        new_aux_output_infos=new_aux_output_infos,
                         finish_reason=request.get_finished_reason(),
                         new_logprobs=new_logprobs,
                         new_prompt_logprobs_tensors=prompt_logprobs_tensors,
@@ -1041,6 +1054,7 @@ class Scheduler(SchedulerInterface):
         self,
         request: Request,
         new_token_ids: list[int],
+        abort_from_sampling: set[str]|None = None,
     ) -> tuple[list[int], bool]:
         # Append generated tokens and check for stop. Note that if
         # a request is still being prefilled, we expect the model runner
@@ -1051,7 +1065,7 @@ class Scheduler(SchedulerInterface):
 
             # Check for stop and update request state.
             # This must be called before we make the EngineCoreOutput.
-            stopped = check_stop(request, self.max_model_len)
+            stopped = check_stop(request, self.max_model_len, None, abort_from_sampling)
             if stopped:
                 del new_token_ids[num_new:]  # Trim new tokens if needed.
                 break
