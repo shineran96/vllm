@@ -1124,13 +1124,17 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # Copy the tensors to the GPU.
         self._prepare_input_ids(total_num_scheduled_tokens, cu_num_tokens)
 
-        if self.input_batch.prev_output_embeds and self.model_sampling:
+        if self.model_sampling:
             discard_sampled_tokens_req_indices = \
                     self.discard_request_indices.np[:self.num_discarded_requests]
             invalid_req_indices = discard_sampled_tokens_req_indices.tolist()
             invalid_req_indices_set = set(invalid_req_indices)
             output_idx = 0
             for req_idx in range(num_reqs):
+
+                req_ids = self.input_batch.req_ids
+                req = self.requests[req_ids[req_idx]]
+
                 num_sched = num_scheduled_tokens[req_idx]
 
                 if req_idx in invalid_req_indices_set:
@@ -1138,7 +1142,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     continue
 
                 # Skip if this request doesn't have embeddings
-                if req_idx not in self.input_batch.prev_output_embeds:
+                if req.prev_output_embeds is None:
                     output_idx += num_sched
                     continue
 
@@ -1146,7 +1150,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     output_idx += num_sched
                     continue
 
-                req_embeds = self.input_batch.prev_output_embeds[req_idx]
+                req_embeds = req.prev_output_embeds
 
                 self.inputs_embeds.gpu[output_idx:output_idx +
                                            num_sched].copy_(
@@ -2098,7 +2102,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # in the CUDA graph will be more performant (like in the else case
             # below).
 
-            if not self.input_batch.prev_output_embeds:
+            if not self.model_sampling:
                 token_ids_idx = self.is_token_ids.gpu[:num_scheduled_tokens] \
                     .nonzero(as_tuple=False) \
                     .squeeze(1)

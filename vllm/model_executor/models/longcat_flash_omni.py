@@ -620,7 +620,7 @@ class LongcatFlashOmniForCausalLM(LongcatFlashForCausalLM):
             output_embeddings[decode_idx] = output_embeddings_part
 
             for i, idx in enumerate(decode_idx):
-                forward_batch.prev_output_embeds[idx] = output_embeddings[idx]
+                cur_reqs[idx].prev_output_embeds = output_embeddings[idx]
         
         for rid in finish_rids:
             del self.sm_dict[rid]

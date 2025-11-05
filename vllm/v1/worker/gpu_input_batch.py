@@ -45,6 +45,7 @@ class CachedRequestState:
 
     lora_request: Optional[LoRARequest] = None
     prompt_embeds: Optional[torch.Tensor] = None
+    prev_output_embeds: Optional[torch.Tensor] = None
 
     def __post_init__(self):
         self.num_prompt_tokens = length_from_prompt_token_ids_or_embeds(
@@ -124,7 +125,6 @@ class InputBatch:
         # allocation if max_model_len is big.
         # Maps req_index -> tensor of shape (num_prompt_tokens, hidden_size)
         self.req_prompt_embeds: dict[int, torch.Tensor] = {}
-        self.prev_output_embeds: dict[int, torch.Tensor] = {}
         self.num_tokens = np.zeros(max_num_reqs, dtype=np.int32)
         self.num_tokens_no_spec = np.zeros(max_num_reqs, dtype=np.int32)
         self.num_prompt_tokens = np.zeros(max_num_reqs, dtype=np.int32)
@@ -541,17 +541,6 @@ class InputBatch:
         else:
             self.req_prompt_embeds.pop(i1, None)
 
-        o_embeds_i1 = self.prev_output_embeds.get(i1)
-        o_embeds_i2 = self.prev_output_embeds.get(i2)
-        if o_embeds_i1 is not None:
-            self.prev_output_embeds[i2] = o_embeds_i1
-        else:
-            self.prev_output_embeds.pop(i2, None)
-        if o_embeds_i2 is not None:
-            self.prev_output_embeds[i1] = o_embeds_i2
-        else:
-            self.prev_output_embeds.pop(i1, None)
-
         self.block_table.swap_row(i1, i2)
 
         self.request_lora_mapping[i1], self.request_lora_mapping[i2] = \
@@ -646,9 +635,6 @@ class InputBatch:
             if last_req_index in self.req_prompt_embeds:
                 self.req_prompt_embeds[
                     empty_index] = self.req_prompt_embeds.pop(last_req_index)
-            if last_req_index in self.prev_output_embeds:
-                self.prev_output_embeds[
-                    empty_index] = self.prev_output_embeds.pop(last_req_index)
             self.num_tokens[empty_index] = num_tokens
             self.num_tokens_no_spec[empty_index] = self.num_tokens_no_spec[
                 last_req_index]
